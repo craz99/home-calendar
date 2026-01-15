@@ -1,0 +1,10 @@
+cache
+client/build/
+client/node_modules/
+node_modules/
+.env
+.env.development
+.env.production
+.idea/
+.history/
+launch.json

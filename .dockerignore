@@ -1,0 +1,70 @@
+# Git
+.git
+.gitignore
+
+# Dependencies
+node_modules/
+client/node_modules/
+npm-debug.log
+npm-debug.log.*
+yarn-error.log
+yarn-error.log.*
+
+# Environment files (don't bake secrets into images)
+.env
+.env.development
+.env.production
+.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build artifacts
+client/build/
+dist/
+
+# Logs
+logs/
+*.log
+
+# Cache and temporary files
+cache/
+.history/
+.cache/
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# CI/CD
+.gitlab-ci.yml
+.github/
+
+# Development
+nodemon.json
+jest.config.js
+eslint.config.js
+*.test.js
+
+# Miscellaneous
+README.md
+LICENSE
+*.md
+.claude/
+.claude.json*
+claude-personal.sh
+launch.json
+ecosystem.config.cjs
+
+# User configuration files (use public-config.template.json instead)
+public-config.json
+public-config_*.json
+
+# PM2
+ecosystem.config.cjs
