@@ -1,0 +1,14 @@
+{
+  "exec": "node --inspect server.js",
+  "ext": "js,json",
+  "ignore": [
+    "node_modules/",
+    "cache/"
+  ],
+  "env": {
+    "NODE_ENV": "development"
+  },
+  "legacyWatch": true,
+  "verbose": true,
+  "delay": "1500ms"
+}

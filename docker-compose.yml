@@ -1,0 +1,70 @@
+services:
+  home-calendar:
+    image: home-calendar:latest
+    container_name: home-calendar
+    restart: unless-stopped
+    ports:
+      - "${PORT:-5500}:5500"
+    environment:
+      # Core configuration
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 5500
+      CACHE_DURATION_MS: ${CACHE_DURATION_MS:-600000}
+
+      # Weather API (required)
+      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY}
+      WEATHER_DEFAULT_LATITUDE: ${WEATHER_DEFAULT_LATITUDE:-40.7128}
+      WEATHER_DEFAULT_LONGITUDE: ${WEATHER_DEFAULT_LONGITUDE:--74.0060}
+
+      # Calendar configuration (optional)
+      IGNORED_EVENT_IDS: ${IGNORED_EVENT_IDS:-}
+      API_BASE_URL: ${API_BASE_URL:-}
+
+      # OctoPrint configuration (optional)
+      OCTOPRINT_URL: ${OCTOPRINT_URL:-}
+      OCTOPRINT_API_KEY: ${OCTOPRINT_API_KEY:-}
+      OCTOPRINT_REFRESH_INTERVAL_SECONDS: ${OCTOPRINT_REFRESH_INTERVAL_SECONDS:-60}
+
+      # MQTT configuration (optional)
+      MQTT_BROKER: ${MQTT_BROKER:-}
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      MQTT_GARAGE_DOOR_TOPIC: ${MQTT_GARAGE_DOOR_TOPIC:-}
+
+    volumes:
+      # Mount your custom calendar config (optional - defaults to template with Holidays only)
+      # Copy public-config.json from the repo root, modify it, then uncomment the line below
+      # - ./public-config.json:/app/public-config.json:ro
+      # Mount cache directory for data persistence
+      - home-calendar-cache:/app/cache
+
+    restart: unless-stopped
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5500/api/config', (r) => r.statusCode === 200 ? process.exit(0) : process.exit(1)).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+    # Resource limits (adjust as needed for your hardware)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  home-calendar-cache:
+    driver: local

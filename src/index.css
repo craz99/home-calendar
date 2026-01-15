@@ -1,0 +1,28 @@
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+.fc-event-title {
+  /*font-size: 1em !important;*/
+}
+
+.fc-timegrid-slot {
+  /*height: 2em !important; !* Adjust '3em' to your desired height *!*/
+}
+
+/*.fc-timegrid-event-harness {*/
+/*  !* Adjust if event elements need more space due to increased slot height *!*/
+/*  !* You might not need this depending on your content *!*/
+/*  height: 3em;*/
+/*  line-height: 3em;*/
+/*}*/

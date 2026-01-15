@@ -1,0 +1,17 @@
+{
+  "appTitle": "Home Calendar",
+  "styleSettings": {
+    "eventTitleLines": 3,
+    "showGarageDoorStatus": false,
+    "showPrinterStatus": false,
+    "showWeatherInLegend": false
+  },
+  "calendars": [
+    {
+      "id": 1,
+      "url": "https://calendar.google.com/calendar/ical/en.usa%23holiday%40group.v.calendar.google.com/public/basic.ics",
+      "color": "cyan",
+      "name": "Holidays"
+    }
+  ]
+}
