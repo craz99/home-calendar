@@ -30,6 +30,15 @@ if [ ! -f "Dockerfile" ]; then
   exit 1
 fi
 
+# Auto-increment buildNumber in package.json
+echo -e "${BLUE}Incrementing buildNumber...${NC}"
+CURRENT_BUILD=$(grep '"buildNumber"' package.json | grep -o '[0-9]\+')
+NEW_BUILD=$((CURRENT_BUILD + 1))
+sed -i.bak "s/\"buildNumber\": \"$CURRENT_BUILD\"/\"buildNumber\": \"$NEW_BUILD\"/" package.json
+rm -f package.json.bak
+echo "Build number: $CURRENT_BUILD → $NEW_BUILD"
+echo ""
+
 # Check if .dockerignore exists
 if [ ! -f ".dockerignore" ]; then
   echo "Warning: .dockerignore not found, creating default..."
@@ -63,6 +72,18 @@ docker buildx build --no-cache \
 echo ""
 echo -e "${GREEN}✓ Build complete!${NC}"
 echo ""
+
+# Commit the updated buildNumber
+if git diff-index --quiet HEAD --; then
+  # Working directory is clean
+  git add package.json
+  git commit -m "Bump buildNumber to $NEW_BUILD for Docker build" || true
+  echo "Build version committed"
+else
+  echo "Note: Working directory has uncommitted changes, skipping auto-commit"
+fi
+echo ""
+
 echo "You can now run the container with:"
 echo "  docker run -p 5500:5500 --env-file .env $FULL_IMAGE_NAME"
 echo ""

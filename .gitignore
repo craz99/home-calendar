@@ -2,9 +2,14 @@ cache
 client/build/
 client/node_modules/
 node_modules/
+server_bck.js
 .env
 .env.development
 .env.production
 .idea/
 .history/
+.claude.json
+.claude.json.global
+.claude/
 launch.json
+claude-personal.sh

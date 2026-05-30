@@ -33,6 +33,34 @@ const WEATHER_ICON_MAP = new Map([
     ['tornado', 'fa-tornado'],
 ]);
 
+// Helper to format error messages with type-specific details
+const formatErrorMessage = (error) => {
+    let message = error.error;
+    let icon = 'fa-exclamation-circle';
+
+    if (error.type === 'timeout') {
+        icon = 'fa-hourglass-end';
+        message = `Timeout: ${message}`;
+    } else if (error.type === 'network') {
+        icon = 'fa-wifi-slash';
+        message = `Network error: ${message}`;
+    } else if (error.type === 'auth') {
+        icon = 'fa-lock';
+        message = `Authentication failed: ${message}`;
+    } else if (error.type === 'notfound') {
+        icon = 'fa-search';
+        message = `Calendar not found: ${message}`;
+    } else if (error.type === 'server') {
+        icon = 'fa-server';
+        message = `Server error (${error.statusCode}): ${message}`;
+    } else if (error.type === 'malformed') {
+        icon = 'fa-file-code';
+        message = `Invalid calendar format: ${message}`;
+    }
+
+    return { message, icon };
+};
+
 // Helper to get icon for event title
 const getIconForEvent = (title) => {
     const lowerCaseTitle = title.toLowerCase();
@@ -104,12 +132,15 @@ const isBeforeToday = (momentDate, todayDate) => {
 const App = () => {
     // --- ADD NEW STATE FOR CONFIG ---
     const [appConfig, setAppConfig] = useState(null); // Will hold { calendars: [], styleSettings: {} }
+    const [version, setVersion] = useState(null);
 
     const [events, setEvents] = useState([]);
     const [weatherForecast, setWeatherForecast] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const [calendarErrors, setCalendarErrors] = useState([]);
     const [startDate, setStartDate] = useState(moment().startOf('isoWeek'));
+    const fetchDataRef = useRef(null);
 
     // --- MODIFIED STATE INITIALIZATION ---
     const [currentTimeDisplay, setCurrentTimeDisplay] = useState(() => formatNativeDate(new Date()));
@@ -137,6 +168,23 @@ const App = () => {
             }
         };
         fetchConfig();
+    }, []); // Runs once on mount
+
+    // --- FETCH VERSION ---
+    useEffect(() => {
+        const fetchVersion = async () => {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/version`);
+                if (!response.ok) {
+                    throw new Error('Failed to load version');
+                }
+                const versionData = await response.json();
+                setVersion(versionData);
+            } catch (err) {
+                console.error("Error fetching version:", err);
+            }
+        };
+        fetchVersion();
     }, []); // Runs once on mount
 
     // --- OCTOPRINT STATUS LOADING ---
@@ -179,27 +227,39 @@ const App = () => {
 
         const fetchAllData = async () => {
             setLoading(true);
-            setError(null);
 
             try {
                 // --- GET URLs FROM CONFIG STATE ---
                 const calendarUrls = appConfig.calendars.map(c => c.url);
 
                 // --- PASS URLs TO loadEvents ---
-                // loadEvents now returns the events instead of setting state directly.
-                const fetchedEvents = await loadEvents(calendarUrls);
-                const weatherPromise = loadWeather(setWeatherForecast); // Weather is not filtered
-                await Promise.all([weatherPromise]); // Await weather (printer has its own refresh cycle)
+                // loadEvents now returns { events, errors }
+                const { events: fetchedEvents, errors: calendarErrs } = await loadEvents(calendarUrls);
+                const weatherPromise = loadWeather(setWeatherForecast);
+                await Promise.all([weatherPromise]);
 
+                // Atomically update events and error states once all data is ready
                 setEvents(fetchedEvents);
+                setError(null);
+                setCalendarErrors([]);
+
+                // Store calendar errors for detailed display
+                if (calendarErrs && calendarErrs.length > 0) {
+                    setCalendarErrors(calendarErrs);
+                    const successCount = calendarUrls.length - calendarErrs.length;
+                    const failCount = calendarErrs.length;
+                    setError(`${successCount}/${calendarUrls.length} calendars loaded (${failCount} failed)`);
+                }
             } catch (err) {
                 console.error("Error during data fetch coordination:", err);
                 setError(`Failed to load data: ${err.message || 'An unexpected error occurred.'}`);
+                setCalendarErrors([]);
             } finally {
                 setLoading(false);
             }
         };
 
+        fetchDataRef.current = fetchAllData;
         fetchAllData();
         const intervalId = setInterval(fetchAllData, REFRESH_INTERVAL_MINUTES * 60 * 1000);
         return () => clearInterval(intervalId);
@@ -380,6 +440,7 @@ const App = () => {
         fileName: null,
         enabled: false
     });
+    const [showErrorDetails, setShowErrorDetails] = useState(false);
 
     return (
         // --- ADD THE CSS VARIABLE TO THE CONTAINER ---
@@ -458,7 +519,63 @@ const App = () => {
                 </Col>
                 <Col xs="auto" className="text-end">
                     {loading && <Alert variant="info" className="p-2 mb-0 d-inline-block"><i className="fas fa-spinner fa-spin me-2"></i> Loading...</Alert>}
-                    {error && !loading && <Alert variant="danger" onClose={() => setError(null)} dismissible className="p-2 mb-0 d-inline-block"><i className="fas fa-exclamation-triangle me-2"></i> {error}</Alert>}
+                    {error && !loading && (
+                        <div className="d-inline-block">
+                            <Alert
+                                variant={calendarErrors.length === appConfig?.calendars?.length ? "danger" : "warning"}
+                                onClose={() => { setError(null); setShowErrorDetails(false); }}
+                                dismissible
+                                className="p-2 mb-0"
+                            >
+                                <div className="d-flex align-items-center gap-2 justify-content-between">
+                                    <div>
+                                        <i className="fas fa-exclamation-triangle me-2"></i>
+                                        {error}
+                                    </div>
+                                    <div className="d-flex gap-2">
+                                        {calendarErrors.length > 0 && (
+                                            <Button
+                                                size="sm"
+                                                variant="outline-secondary"
+                                                onClick={() => setShowErrorDetails(!showErrorDetails)}
+                                                className="px-2 py-0"
+                                            >
+                                                {showErrorDetails ? 'Hide' : 'Details'}
+                                            </Button>
+                                        )}
+                                        <Button
+                                            size="sm"
+                                            variant="outline-secondary"
+                                            onClick={() => fetchDataRef.current?.()}
+                                            className="px-2 py-0"
+                                        >
+                                            <i className="fas fa-redo me-1"></i>Retry
+                                        </Button>
+                                    </div>
+                                </div>
+                                {showErrorDetails && calendarErrors.length > 0 && (
+                                    <div className="mt-2 pt-2 border-top">
+                                        <small>
+                                            {calendarErrors.map((err) => {
+                                                const { message, icon } = formatErrorMessage(err);
+                                                return (
+                                                    <div key={err.url} className="mb-1">
+                                                        <i className={`fas ${icon} me-1`}></i>
+                                                        <strong>{err.url.replace(/^https?:\/\//, '').substring(0, 40)}...</strong>
+                                                        <br />
+                                                        <span className="ms-4 text-muted">{message}</span>
+                                                    </div>
+                                                );
+                                            })}
+                                        </small>
+                                    </div>
+                                )}
+                            </Alert>
+                        </div>
+                    )}
+                    {version && !loading && !error && (
+                        <div className="version-badge ms-2 d-inline-block">v{version.version}</div>
+                    )}
                 </Col>
             </Row>
 

@@ -10,9 +10,24 @@ const { RRule, RRuleSet, rrulestr } = pkg;
 
 const CACHE_DIR = './cache';
 const CACHE_TTL_MS = 1000 * 60 * 20; // 20 minutes
+const REQUEST_TIMEOUT_MS = 25 * 1000; // 25 seconds timeout for calendar requests
 
-async function getCachedData(url) {
-    const hash = crypto.createHash('md5').update(url).digest('hex');
+/**
+ * Get the current DST offset for a given timezone to use in cache invalidation.
+ * This ensures cache is invalidated when DST transitions occur.
+ */
+function getDSTCacheKey(timezone) {
+    const now = DateTime.now().setZone(timezone);
+    // Returns offset in hours (e.g., -5 for EST, -4 for EDT)
+    // This changes when DST transitions occur, invalidating old cache
+    return now.offset / 60;
+}
+
+async function getCachedData(url, timezone = 'America/New_York') {
+    // Include DST offset in cache key to invalidate cache across DST transitions
+    const dstOffset = getDSTCacheKey(timezone);
+    const cacheKey = `${url}|offset:${dstOffset}`;
+    const hash = crypto.createHash('md5').update(cacheKey).digest('hex');
     const filePath = path.join(CACHE_DIR, `${hash}.ics`);
 
     try {
@@ -24,8 +39,8 @@ async function getCachedData(url) {
         // Cache miss or expired
     }
     // --- MODIFIED LOG ---
-    console.log("Cache miss for URL hash:", hash);
-    const response = await axios.get(url);
+    console.log("Cache miss for URL hash:", hash, "(timezone offset:", dstOffset, ")");
+    const response = await axios.get(url, { timeout: REQUEST_TIMEOUT_MS });
     let data = response.data;
 
     try {
@@ -34,6 +49,85 @@ async function getCachedData(url) {
     } catch (err) {
         // --- MODIFIED LOG ---
         console.warn(`Failed to write cache for URL hash: ${hash}:`, err);
+    }
+
+    return data;
+}
+
+async function fetchCalDAVData(cal) {
+    const body = `<?xml version="1.0" encoding="utf-8"?>
+<calendar-query xmlns="urn:ietf:params:xml:ns:caldav" xmlns:DAV="DAV:">
+  <DAV:prop>
+    <DAV:getetag/>
+    <calendar-data/>
+  </DAV:prop>
+  <filter>
+    <comp-filter name="VCALENDAR"/>
+  </filter>
+</calendar-query>`;
+
+    const response = await axios({
+        method: 'REPORT',
+        url: cal.url,
+        headers: {
+            'Depth': '1',
+            'Content-Type': 'application/xml',
+        },
+        auth: { username: cal.username, password: cal.password },
+        data: body,
+        timeout: REQUEST_TIMEOUT_MS,
+    });
+
+    return extractIcsFromCalDAVResponse(response.data);
+}
+
+function extractIcsFromCalDAVResponse(xmlData) {
+    // Extract all calendar-data blocks from the multistatus XML response
+    const matches = [...xmlData.matchAll(/<[^:>]*:?calendar-data[^>]*>([\s\S]*?)<\/[^:>]*:?calendar-data>/gi)];
+
+    // Get all VEVENT blocks from the extracted data
+    const events = matches
+        .map(m => m[1].trim())
+        .filter(Boolean)
+        .flatMap(block => {
+            // Extract VEVENT blocks from each calendar-data element
+            return [...block.matchAll(/BEGIN:VEVENT[\s\S]*?END:VEVENT/g)].map(e => e[0]);
+        });
+
+    // Construct a valid ICS document with all VEVENTs
+    return [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//home-calendar//caldav//EN',
+        ...events,
+        'END:VCALENDAR'
+    ].join('\r\n');
+}
+
+async function getCachedCalDAVData(cal, timezone = 'America/New_York') {
+    // Include DST offset in cache key to invalidate cache across DST transitions
+    const dstOffset = getDSTCacheKey(timezone);
+    const cacheKey = `${cal.url}|offset:${dstOffset}`;
+    const hash = crypto.createHash('md5').update(cacheKey).digest('hex');
+    const filePath = path.join(CACHE_DIR, `${hash}.ics`);
+
+    try {
+        const stat = await fs.stat(filePath);
+        if (Date.now() - stat.mtimeMs < CACHE_TTL_MS) {
+            return await fs.readFile(filePath, 'utf-8');
+        }
+    } catch {
+        // Cache miss or expired
+    }
+
+    console.log("CalDAV cache miss for URL hash:", hash, "(timezone offset:", dstOffset, ")");
+    const data = await fetchCalDAVData(cal);
+
+    try {
+        await fs.mkdir(CACHE_DIR, { recursive: true });
+        await fs.writeFile(filePath, data);
+    } catch (err) {
+        console.warn(`Failed to write CalDAV cache for hash: ${hash}:`, err);
     }
 
     return data;
@@ -310,8 +404,30 @@ export function parseIcsData(icsData, timezone, startRange, endRange, url) {
                 if (isAllDay && itemStart < adjustedEnd) {
                     // This is a multi-day or single-day all-day event.
                     // Split it into individual day events for the client.
-                    let currentDay = DateTime.fromJSDate(itemStart, { zone: timezone }).startOf('day');
-                    const lastDay = DateTime.fromJSDate(adjustedEnd, { zone: timezone }).startOf('day');
+                    // For all-day events, node-ical returns dates with the system's timezone assumption.
+                    // We need to extract the UTC date components and treat them as the actual calendar date.
+                    const utcStart = DateTime.fromJSDate(itemStart, { zone: 'utc' });
+                    let currentDay = DateTime.fromObject({
+                        year: utcStart.year,
+                        month: utcStart.month,
+                        day: utcStart.day,
+                        hour: 0,
+                        minute: 0,
+                        second: 0
+                    }, { zone: timezone });
+
+                    // For all-day events, item.end is exclusive (points to the day after the event).
+                    // We use the UTC date component of item.end (not adjustedEnd), then subtract 1 day
+                    // to get the last day of the event.
+                    const utcEnd = DateTime.fromJSDate(item.end, { zone: 'utc' });
+                    const lastDay = DateTime.fromObject({
+                        year: utcEnd.year,
+                        month: utcEnd.month,
+                        day: utcEnd.day,
+                        hour: 0,
+                        minute: 0,
+                        second: 0
+                    }, { zone: timezone }).minus({ days: 1 });
 
                     while (currentDay.toMillis() <= lastDay.toMillis()) {
                         // Only add days that fall within the requested range
@@ -347,25 +463,74 @@ export function parseIcsData(icsData, timezone, startRange, endRange, url) {
     return allEvents;
 }
 
-export async function getCalendarEventsFromUrls(urls, timezone = 'UTC', startDate, endDate) {
+export async function getCalendarEventsFromUrls(calendars, timezone = 'UTC', startDate, endDate) {
     const allEvents = [];
+    const errors = [];
 
     // The core parsing logic now expects native Date objects.
     const startRange = startDate.toJSDate();
     const endRange = endDate.toJSDate();
 
-    for (const url of urls) {
-        const urlHash = crypto.createHash('md5').update(url).digest('hex').substring(0, 7);
-        console.log(`Processing URL hash: ${urlHash}...`);
+    for (const cal of calendars) {
+        try {
+            const url = cal.url || cal; // Support both calendar objects and legacy URL strings
+            const calendarUrl = typeof url === 'string' ? url : cal.url;
+            const urlHash = crypto.createHash('md5').update(calendarUrl).digest('hex').substring(0, 7);
 
-        const icsData = await getCachedData(url);
-        const eventsFromUrl = parseIcsData(icsData, timezone, startRange, endRange, url);
-        allEvents.push(...eventsFromUrl);
+            const type = typeof cal === 'string' ? 'ics' : (cal.type || 'ics');
+            console.log(`Processing URL hash: ${urlHash} (type: ${type})...`);
+
+            let icsData;
+            if (type === 'caldav') {
+                icsData = await getCachedCalDAVData(cal, timezone);
+            } else {
+                icsData = await getCachedData(calendarUrl, timezone);
+            }
+
+            const eventsFromUrl = parseIcsData(icsData, timezone, startRange, endRange, calendarUrl);
+            allEvents.push(...eventsFromUrl);
+        } catch (error) {
+            const url = typeof cal === 'string' ? cal : cal.url;
+            const errorMessage = error.message || String(error);
+            console.error(`Error fetching calendar ${url}:`, error);
+
+            // Classify error type for better user feedback
+            let errorType = 'unknown';
+            let statusCode = undefined;
+
+            if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+                errorType = 'timeout';
+            } else if (error.response?.status === 401 || error.response?.status === 403) {
+                errorType = 'auth';
+                statusCode = error.response.status;
+            } else if (error.response?.status === 404) {
+                errorType = 'notfound';
+                statusCode = 404;
+            } else if (error.response?.status >= 500) {
+                errorType = 'server';
+                statusCode = error.response.status;
+            } else if (error.response?.status >= 400) {
+                errorType = 'client';
+                statusCode = error.response.status;
+            } else if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+                errorType = 'network';
+            } else if (error.message?.toLowerCase().includes('malformed') || error.message?.toLowerCase().includes('parse')) {
+                errorType = 'malformed';
+            }
+
+            errors.push({
+                url,
+                error: errorMessage,
+                type: errorType,
+                ...(statusCode !== undefined && { statusCode })
+            });
+        }
     }
 
-    return allEvents;
+    return { events: allEvents, errors };
 }
 
+// eslint-disable-next-line no-unused-vars
 function detectEvent(item) {
     // Placeholder for debugging specific events
     // Replace 'DEBUG_EVENT_NAME' with an event title to debug

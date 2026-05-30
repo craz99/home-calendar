@@ -12,6 +12,16 @@
       "url": "https://calendar.google.com/calendar/ical/en.usa%23holiday%40group.v.calendar.google.com/public/basic.ics",
       "color": "cyan",
       "name": "Holidays"
+    },
+    {
+      "id": 2,
+      "url": "https://caldav.calendar.yahoo.com/dav/username/Calendar/123/",
+      "type": "caldav",
+      "username": "user@yahoo.com",
+      "password": "app-specific-password",
+      "color": "orange",
+      "name": "Yahoo Calendar",
+      "comment": "CalDAV calendars require type: 'caldav', username, and password. Remove comment and fill in credentials to enable."
     }
   ]
 }

@@ -164,6 +164,14 @@ html, body, #root {
   white-space: nowrap;
 }
 
+/* === Version Badge === */
+.version-badge {
+  font-size: 0.75rem;
+  color: #999;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
 /* === Legend === */
 .calendar-legend-container {
   display: flex;
@@ -186,6 +194,11 @@ html, body, #root {
   height: 20px;
   margin-right: 8px;
   border-radius: 4px;
+}
+.calendar-legend-container li:not(:last-child) {
+  border-right: 1px solid #d0d0d0;
+  padding-right: 8px;
+  margin-right: 8px;
 }
 
 /* === Date Background States === */

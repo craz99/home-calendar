@@ -3,7 +3,7 @@
 // Copy this to ecosystem.config.cjs and customize with your values
 // DO NOT COMMIT ecosystem.config.cjs - it's in .gitignore
 
-export default {
+module.exports = {
     apps : [{
         name   : "calendar-app", // A friendly name for your application
         script : "./server.js",  // Path to your main server file

@@ -299,6 +299,71 @@ END:VEVENT
             expect(events).toHaveLength(0);
         });
 
+        it('should only return a single-day all-day event on the correct day', () => {
+            // Test case for "Work at Denver's Daycare" on March 23, 2026
+            const icsData = createIcs(`
+BEGIN:VEVENT
+DTSTART;VALUE=DATE:20260323
+DTEND;VALUE=DATE:20260324
+SUMMARY:Work at Denver's Daycare
+UID:denver-daycare-event
+END:VEVENT
+            `);
+            // Query a range that includes March 22, 23, and 24
+            const startRange = DateTime.fromISO('2026-03-22T00:00:00', { zone: timezone }).toJSDate();
+            const endRange = DateTime.fromISO('2026-03-24T23:59:59', { zone: timezone }).toJSDate();
+
+            const events = parseIcsData(icsData, timezone, startRange, endRange, url);
+
+            // Should only return ONE event, for March 23rd
+            expect(events).toHaveLength(1);
+            expect(events[0].title).toBe("Work at Denver's Daycare");
+            expect(events[0].allDay).toBe(true);
+
+            // Verify the event is on March 23rd in the target timezone
+            const eventDate = DateTime.fromJSDate(events[0].start, { zone: timezone });
+            expect(eventDate.toISODate()).toBe('2026-03-23');
+
+            // The event should NOT span to March 22nd or 24th
+            const eventDates = events.map(e => DateTime.fromJSDate(e.start, { zone: timezone }).toISODate());
+            expect(eventDates).not.toContain('2026-03-22');
+            expect(eventDates).not.toContain('2026-03-24');
+        });
+
+        it('should handle all-day events correctly in UTC timezone (regression test for Docker/Raspberry Pi)', () => {
+            // This test reproduces the issue where all-day events appeared on multiple days
+            // when the system timezone was UTC instead of a localized timezone.
+            // The bug was in the non-recurring all-day event handling at line 327.
+            const icsData = createIcs(`
+BEGIN:VEVENT
+DTSTART;VALUE=DATE:20260323
+DTEND;VALUE=DATE:20260324
+SUMMARY:Work at Denver's Daycare
+UID:denver-daycare-utc-test
+END:VEVENT
+            `);
+
+            const utcTimezone = 'UTC';
+            const startRange = DateTime.fromISO('2026-03-22T00:00:00', { zone: utcTimezone }).toJSDate();
+            const endRange = DateTime.fromISO('2026-03-24T23:59:59', { zone: utcTimezone }).toJSDate();
+
+            const events = parseIcsData(icsData, utcTimezone, startRange, endRange, url);
+
+            // Should only return ONE event, for March 23rd
+            expect(events).toHaveLength(1);
+            expect(events[0].title).toBe("Work at Denver's Daycare");
+            expect(events[0].allDay).toBe(true);
+
+            // Verify the event is on March 23rd in UTC timezone
+            const eventDate = DateTime.fromJSDate(events[0].start, { zone: utcTimezone });
+            expect(eventDate.toISODate()).toBe('2026-03-23');
+
+            // The event should NOT appear on March 22nd or 24th
+            const eventDates = events.map(e => DateTime.fromJSDate(e.start, { zone: utcTimezone }).toISODate());
+            expect(eventDates).not.toContain('2026-03-22');
+            expect(eventDates).not.toContain('2026-03-24');
+        });
+
         it('should handle a recurring event with an INTERVAL', () => {
             const icsData = createIcs(`
 BEGIN:VEVENT

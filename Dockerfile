@@ -6,15 +6,15 @@ WORKDIR /app
 # Copy root package files
 COPY package*.json ./
 
-# Install root dependencies
-RUN npm ci --only=production
+# Install root dependencies with increased timeout for multi-arch builds
+RUN npm ci --omit=dev --fetch-timeout=60000 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000
 
 # Copy entire client directory
 COPY client/ client/
 
-# Install client dependencies and build
+# Install client dependencies and build with increased timeout for multi-arch builds
 WORKDIR /app/client
-RUN npm ci && npm run build
+RUN npm ci --fetch-timeout=60000 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000 && npm run build
 
 # Production stage
 FROM node:25-alpine
@@ -25,6 +25,7 @@ WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
 
 # Copy application code
+COPY package.json .
 COPY server.js .
 COPY services/ ./services/
 

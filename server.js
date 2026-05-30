@@ -49,7 +49,20 @@ const isProduction = process.env.NODE_ENV === 'production';
 
 // Initialize services once during app startup
 initializeWeatherService();
-initializeGarageDoorService();
+
+// Load and cache full config (including credentials) on startup
+let serverConfig = null;
+const configPath = path.join(__dirname, 'public-config.json');
+try {
+    const configData = fs.readFileSync(configPath, 'utf-8');
+    serverConfig = JSON.parse(configData);
+    const showGarageDoorStatus = serverConfig?.styleSettings?.showGarageDoorStatus ?? false;
+    if (showGarageDoorStatus) {
+        initializeGarageDoorService();
+    }
+} catch (error) {
+    console.warn('Failed to load public-config.json:', error);
+}
 
 // --- CORS Configuration ---
 const corsOptions = {
@@ -82,8 +95,23 @@ app.post('/api/calendars/events', async (req, res) => {
     const endDate = clientNow.plus({ days: daysFuture || 180 }).endOf('day');
 
     try {
-        const events = await getCalendarEventsFromUrls(calendarUrls, timezone, startDate, endDate);
-        res.json(events);
+        // Enrich URLs with type and credentials from server config
+        const calendarConfigs = calendarUrls.map(url => {
+            const match = serverConfig?.calendars?.find(c => c.url === url);
+            return match
+                ? { url, type: match.type || 'ics', username: match.username, password: match.password }
+                : { url, type: 'ics' };
+        });
+
+        const { events, errors } = await getCalendarEventsFromUrls(calendarConfigs, timezone, startDate, endDate);
+        const response = {
+            events,
+            calendars: calendarUrls // Include calendar count for client to calculate success count
+        };
+        if (errors && errors.length > 0) {
+            response.errors = errors;
+        }
+        res.json(response);
     } catch (error) {
         console.error('Error fetching calendar events:', error);
         // Provide a generic error message in production for security
@@ -107,11 +135,26 @@ app.get('/api/weather', async (req, res) => {
 
 app.get('/api/config', async (req, res) => {
     try {
-        const configPath = path.join(__dirname, 'public-config.json');
+        const config = serverConfig ? JSON.parse(JSON.stringify(serverConfig)) : {};
 
-        // Use "fs.promises.readFile" instead of "fs.readFile"
-        const data = await fs.promises.readFile(configPath, 'utf-8');
-        const config = JSON.parse(data);
+        // Ensure styleSettings exist with proper defaults
+        if (!config.styleSettings) {
+            config.styleSettings = {};
+        }
+        config.styleSettings.showGarageDoorStatus = config.styleSettings.showGarageDoorStatus ?? false;
+        config.styleSettings.showPrinterStatus = config.styleSettings.showPrinterStatus ?? false;
+        config.styleSettings.showWeatherInLegend = config.styleSettings.showWeatherInLegend ?? false;
+
+        // Strip sensitive fields from calendars before sending to client
+        if (config.calendars) {
+            config.calendars = config.calendars.map(cal => {
+                const safe = { ...cal };
+                delete safe.username;
+                delete safe.password;
+                delete safe.comment;
+                return safe;
+            });
+        }
 
         // Add server-side configuration
         config.printerRefreshIntervalSeconds = parseInt(process.env.OCTOPRINT_REFRESH_INTERVAL_SECONDS) || 60;
@@ -144,6 +187,19 @@ app.get('/api/garage/door/state', async (req, res) => {
         console.error('Error fetching garage door state in API endpoint:', error);
         const errorMessage = isProduction ? 'Failed to retrieve garage door state.' : error.message;
         res.status(500).json({ error: errorMessage });
+    }
+});
+
+// Version API Endpoint
+app.get('/api/version', (req, res) => {
+    try {
+        const packageJsonPath = path.join(__dirname, 'package.json');
+        const packageData = fs.readFileSync(packageJsonPath, 'utf-8');
+        const { version, buildNumber } = JSON.parse(packageData);
+        res.json({ version, buildNumber });
+    } catch (error) {
+        console.error('Error loading version:', error);
+        res.status(500).json({ error: 'Failed to retrieve version.' });
     }
 });
 

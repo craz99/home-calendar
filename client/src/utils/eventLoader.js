@@ -8,19 +8,18 @@ const API_BASE_URL = process.env.NODE_ENV !== 'production' ? process.env.REACT_A
 /**
  * Loads events from configured calendars and formats them.
  * It does NOT handle loading/error states; those are managed by the calling component.
- * @param {function} setEvents - React state setter for events.
  * @param {string[]} calendarUrls - An array of calendar URLs to fetch.
- * @returns {Promise<Array>} A promise that resolves with the formatted events array.
- * @throws {Error} If fetching or parsing events fails.
+ * @returns {Promise<{events: Array, errors: Array}>} A promise that resolves with formatted events and any calendar errors.
+ * @throws {Error} If the request itself fails (network error, 5xx response).
  */
-export const loadEvents = async (calendarUrls) => { // Updated signature
+export const loadEvents = async (calendarUrls) => {
     try {
         const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
         const response = await fetch(`${API_BASE_URL}/api/calendars/events`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                calendarUrls: calendarUrls, // Use the parameter
+                calendarUrls: calendarUrls,
                 timezone: userTimezone,
                 daysPast: 90,
                 daysFuture: 180,
@@ -40,13 +39,15 @@ export const loadEvents = async (calendarUrls) => { // Updated signature
             } catch (parseError) {
                 console.warn('Could not parse error response JSON:', parseError);
             }
-            throw new Error(`Failed to load events: ${errorDetails}`); // Throw the error
+            throw new Error(`Failed to load events: ${errorDetails}`);
         }
 
         const data = await response.json();
         const formattedEvents = [];
+        const events = data.events || [];
+        const errors = data.errors || [];
 
-        data.forEach((event, index) => {
+        events.forEach((event, index) => {
             // The server now provides an `allDay` flag and pre-splits multi-day events.
             // The client logic can be greatly simplified.
             const eventId = event.id || `event-${event.start}-${event.end}-${event.title}-${index}`;
@@ -61,8 +62,14 @@ export const loadEvents = async (calendarUrls) => { // Updated signature
             });
         });
 
-        console.log(`Events Loaded ${formattedEvents.length} events`);
-        return formattedEvents; // Return data for Promise.all to await
+        if (errors.length > 0) {
+            console.warn('Calendar errors:', errors);
+        }
+
+        const successCount = data.calendars?.length - errors.length || 0;
+        const totalCount = data.calendars?.length || '?';
+        console.log(`Events loaded: ${formattedEvents.length} events (${successCount}/${totalCount} calendars succeeded${errors.length > 0 ? `, ${errors.length} failed` : ''})`);
+        return { events: formattedEvents, errors };
 
     } catch (err) {
         console.error('Error in loadEvents utility:', err);
