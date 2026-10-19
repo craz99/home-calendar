@@ -13,3 +13,7 @@ server_bck.js
 .claude/
 launch.json
 claude-personal.sh
+
+# Filled-in copies of the templates (calendar links, passwords)
+public-config.json
+ecosystem.config.cjs
